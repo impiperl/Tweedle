@@ -15,7 +15,18 @@ sudo ./tweedle status    # current state once
 sudo ./tweedle serve     # run the checks and the API (systemd service)
 sudo ./tweedle pair      # QR code + code to pair the Dee app (single use, 10 min)
 sudo ./tweedle devices   # list paired devices; "devices rm ID" removes one
+sudo ./tweedle testpush  # send a test push to all devices
 ```
+
+## Push
+
+Events go through the Expo Push Service (outgoing HTTPS only). Each device
+gets the levels it chose (`minLevel`: info, warn, error, none), in its own
+language, on the Android channel `info`, `warn` or `error` (the app creates
+these channels). Events within `push.debounce` (3s) are collected; more than
+three for one device become one summary message. Tokens Expo reports as
+`DeviceNotRegistered` are removed. `push.access_token` is only needed if
+enhanced push security is on in the Expo account.
 
 ## API
 

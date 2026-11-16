@@ -21,6 +21,7 @@ import (
 	"github.com/impiperl/Tweedle/internal/config"
 	"github.com/impiperl/Tweedle/internal/i18n"
 	"github.com/impiperl/Tweedle/internal/monitor"
+	"github.com/impiperl/Tweedle/internal/push"
 	"github.com/impiperl/Tweedle/internal/setup"
 	"github.com/impiperl/Tweedle/internal/store"
 )
@@ -35,6 +36,7 @@ func usage() {
   tweedle status [--config PATH]   print the current state once
   tweedle pair   [--config PATH] [--url URL]   show a QR code to pair the Dee app
   tweedle devices [--config PATH] [rm ID]      list or remove paired devices
+  tweedle testpush [--config PATH]             send a test push to all devices
   tweedle version
 
 Default config: %s
@@ -64,6 +66,8 @@ func main() {
 		err = runPair(*cfgPath, *pairURL)
 	case "devices":
 		err = runDevices(*cfgPath, fs.Args())
+	case "testpush":
+		err = runTestPush(*cfgPath)
 	case "version", "--version", "-v":
 		fmt.Println(version)
 	default:
@@ -110,6 +114,9 @@ func runServe(path string) error {
 	}
 	defer st.Close()
 	srv := api.New(cfg, st, version)
+	pusher := push.New(cfg, st)
+	srv.Push = pusher
+	go pusher.Run(ctx)
 	m := monitor.New(cfg, &monitor.LogNotifier{Lang: cfg.Lang, Out: os.Stdout}, srv)
 	srv.Attach(m)
 
@@ -286,4 +293,26 @@ func printSnapshot(lang string, s *monitor.Snapshot) {
 		}
 		fmt.Printf("  %-6s %-24s %s\n", t("level_"+string(c.Level)), c.Name, strings.TrimSpace(detail))
 	}
+}
+
+func runTestPush(path string) error {
+	cfg, err := config.Load(path)
+	if err != nil {
+		return err
+	}
+	st, err := store.Open(cfg.DBPath())
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	sent, failed, skipped, err := push.New(cfg, st).SendTest(ctx)
+	if err != nil {
+		return err
+	}
+	fmt.Println(i18n.T(cfg.Lang, "push_test_result", map[string]string{
+		"sent": strconv.Itoa(sent), "failed": strconv.Itoa(failed), "skipped": strconv.Itoa(skipped),
+	}))
+	return nil
 }

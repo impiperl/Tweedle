@@ -33,6 +33,9 @@ type Server struct {
 
 	touchMu sync.Mutex
 	touched map[int64]time.Time
+
+	// Push, if set, receives every stored event (with its id).
+	Push interface{ Enqueue(store.Event) }
 }
 
 func New(cfg *config.Config, st *store.Store, version string) *Server {
@@ -58,6 +61,9 @@ func (s *Server) Notify(e monitor.Event) {
 		return
 	}
 	se.ID = id
+	if s.Push != nil {
+		s.Push.Enqueue(se)
+	}
 	s.hub.broadcast(func(c *client) any {
 		return map[string]any{"type": "event", "event": s.eventJSON(se, c.lang)}
 	})

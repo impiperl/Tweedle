@@ -70,6 +70,15 @@ type Retention struct {
 	Events  time.Duration `yaml:"events"`
 }
 
+type Push struct {
+	Enabled bool `yaml:"enabled"`
+	// AccessToken is only needed if "enhanced push security" is switched on
+	// in the Expo account.
+	AccessToken string `yaml:"access_token,omitempty"`
+	// Debounce collects events for this long so a burst becomes one message.
+	Debounce time.Duration `yaml:"debounce"`
+}
+
 type Config struct {
 	// Name is shown in the app and in every push message.
 	Name string `yaml:"name"`
@@ -95,6 +104,7 @@ type Config struct {
 	Processes  []Process   `yaml:"processes"`
 	Containers []Container `yaml:"containers"`
 	Certs      Certs       `yaml:"certs"`
+	Push       Push        `yaml:"push"`
 }
 
 // Default returns a configuration with the agreed default values.
@@ -118,6 +128,7 @@ func Default() *Config {
 			LoadPerCore: Limit{Warn: 2},
 		},
 		Certs: Certs{CheckEvery: time.Hour, WarnDays: 14, ErrorDays: 3},
+		Push:  Push{Enabled: true, Debounce: 3 * time.Second},
 	}
 }
 

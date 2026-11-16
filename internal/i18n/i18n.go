@@ -73,6 +73,11 @@ var texts = map[string]map[string]string{
 		"devices_none":      "Keine Geräte gekoppelt.",
 		"devices_removed":   "Gerät {id} entfernt.",
 		"devices_not_found": "Gerät {id} nicht gefunden.",
+		// push
+		"push_title":       "{server} · {level}",
+		"push_summary":     "{n} Meldungen, u. a.: {first}",
+		"push_test":        "Testnachricht von Tweedle – Push funktioniert.",
+		"push_test_result": "{sent} gesendet, {failed} fehlgeschlagen, {skipped} Geräte ohne Push-Token.",
 	},
 	"en": {
 		"started":             "Tweedle started on {server}",
@@ -132,6 +137,10 @@ var texts = map[string]map[string]string{
 		"devices_none":        "No devices paired.",
 		"devices_removed":     "Device {id} removed.",
 		"devices_not_found":   "Device {id} not found.",
+		"push_title":          "{server} · {level}",
+		"push_summary":        "{n} messages, including: {first}",
+		"push_test":           "Test message from Tweedle – push works.",
+		"push_test_result":    "{sent} sent, {failed} failed, {skipped} devices without push token.",
 	},
 }
 

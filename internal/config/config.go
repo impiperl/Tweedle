@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -65,6 +66,24 @@ type Certs struct {
 	Targets    []CertTarget  `yaml:"targets"`
 }
 
+// Endpoint is a URL that must answer, e.g. another server's /mon/health.
+// Only entries with enabled: true are checked.
+type Endpoint struct {
+	Name    string `yaml:"name"`
+	URL     string `yaml:"url"`
+	Enabled bool   `yaml:"enabled"`
+	// Status is the expected HTTP status; 0 accepts anything below 400.
+	Status  int           `yaml:"status,omitempty"`
+	Timeout time.Duration `yaml:"timeout,omitempty"`
+	// Slow, if set, raises a warning when the answer takes longer.
+	Slow time.Duration `yaml:"slow,omitempty"`
+	// Verify checks the TLS certificate (default true).
+	Verify *bool `yaml:"verify,omitempty"`
+}
+
+// ShouldVerify reports whether the TLS certificate is verified.
+func (e Endpoint) ShouldVerify() bool { return e.Verify == nil || *e.Verify }
+
 type Retention struct {
 	Metrics time.Duration `yaml:"metrics"`
 	Events  time.Duration `yaml:"events"`
@@ -104,6 +123,7 @@ type Config struct {
 	Processes  []Process   `yaml:"processes"`
 	Containers []Container `yaml:"containers"`
 	Certs      Certs       `yaml:"certs"`
+	Endpoints  []Endpoint  `yaml:"endpoints"`
 	Push       Push        `yaml:"push"`
 }
 
@@ -128,7 +148,9 @@ func Default() *Config {
 			LoadPerCore: Limit{Warn: 2},
 		},
 		Certs: Certs{CheckEvery: time.Hour, WarnDays: 14, ErrorDays: 3},
-		Push:  Push{Enabled: true, Debounce: 3 * time.Second},
+		// Prod watcher: switched off; set enabled: true on Dev.
+		Endpoints: []Endpoint{{Name: "Prod", URL: "https://gaistnet.com/mon/health"}},
+		Push:      Push{Enabled: true, Debounce: 3 * time.Second},
 	}
 }
 
@@ -188,6 +210,23 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("certs.targets: name %q used twice", t.Name)
 		}
 		certNames[t.Name] = true
+	}
+	epNames := map[string]bool{}
+	for i, e := range c.Endpoints {
+		u, err := url.Parse(e.URL)
+		if e.Name == "" || err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("endpoints[%d]: name and an http(s) url are required", i)
+		}
+		if epNames[e.Name] {
+			return fmt.Errorf("endpoints: name %q used twice", e.Name)
+		}
+		epNames[e.Name] = true
+		if e.Timeout <= 0 {
+			c.Endpoints[i].Timeout = min(10*time.Second, c.Interval*2/3)
+		}
+		if c.Endpoints[i].Timeout >= c.Interval {
+			return fmt.Errorf("endpoints[%d]: timeout must be shorter than interval", i)
+		}
 	}
 	seen := map[string]bool{}
 	for i, p := range c.Processes {

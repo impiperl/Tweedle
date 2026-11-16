@@ -18,6 +18,23 @@ sudo ./tweedle devices   # list paired devices; "devices rm ID" removes one
 sudo ./tweedle testpush  # send a test push to all devices
 ```
 
+## Endpoints
+
+`endpoints:` in the config lists URLs that must answer; only entries with
+`enabled: true` are checked. Each tick every enabled URL
+is requested once (new connection each time). Anything below HTTP 400 counts
+as up, or exactly `status` if set; a timeout (default 10s), connection or TLS
+error raises `endpoint_down` (error), an answer slower than `slow` (if set)
+`endpoint_slow` (warn). A new config contains the Prod watcher switched off;
+on Dev it is switched on:
+
+```yaml
+endpoints:
+  - name: Prod
+    url: https://gaistnet.com/mon/health
+    enabled: true
+```
+
 ## Push
 
 Events go through the Expo Push Service (outgoing HTTPS only). Each device

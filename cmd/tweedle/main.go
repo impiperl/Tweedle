@@ -293,6 +293,19 @@ func printSnapshot(lang string, s *monitor.Snapshot) {
 		}
 		fmt.Printf("  %-6s %-24s %s\n", t("level_"+string(c.Level)), c.Name, strings.TrimSpace(detail))
 	}
+	if len(s.Endpoints) > 0 {
+		fmt.Printf("\n%s\n", t("status_endpoints"))
+	}
+	for _, e := range s.Endpoints {
+		detail := fmt.Sprintf("%d ms", e.LatencyMs)
+		if e.Status != 0 {
+			detail = fmt.Sprintf("HTTP %d  %s", e.Status, detail)
+		}
+		if e.Error != "" {
+			detail = e.Error
+		}
+		fmt.Printf("  %-6s %-24s %s\n", t("level_"+string(e.Level)), e.Name, detail)
+	}
 }
 
 func runTestPush(path string) error {

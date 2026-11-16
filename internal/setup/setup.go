@@ -1,5 +1,5 @@
 // Package setup is the interactive selection of watched processes and
-// containers ("tweedel setup").
+// containers ("tweedle setup").
 package setup
 
 import (

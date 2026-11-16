@@ -44,6 +44,7 @@ type Snapshot struct {
 	System     *collect.System   `json:"system"`
 	Processes  []ProcStatus      `json:"processes"`
 	Containers []ContainerStatus `json:"containers"`
+	Certs      []CertStatus      `json:"certs"`
 	PodmanErr  string            `json:"podmanError,omitempty"`
 	Levels     map[string]Level  `json:"levels"` // reported level per check key
 }
@@ -53,10 +54,14 @@ type Monitor struct {
 	sys       *collect.SystemCollector
 	procs     *collect.ProcessCollector
 	tracker   *Tracker
+	certs     *certChecker
 	notifiers []Notifier
 
 	lastPIDs  map[string]map[int32]int64 // process name → pid → create time, last time it was seen running
 	lastStart map[string]int64           // container name → StartedAt
+
+	// OnTick, if set, is called with every new snapshot (before events are emitted).
+	OnTick func(*Snapshot)
 
 	mu   sync.RWMutex
 	snap *Snapshot
@@ -68,6 +73,7 @@ func New(cfg *config.Config, notifiers ...Notifier) *Monitor {
 		sys:       collect.NewSystemCollector(cfg.Disks),
 		procs:     collect.NewProcessCollector(),
 		tracker:   NewTracker(cfg.FailAfter),
+		certs:     newCertChecker(cfg.Certs),
 		notifiers: notifiers,
 		lastPIDs:  map[string]map[int32]int64{},
 		lastStart: map[string]int64{},
@@ -83,7 +89,7 @@ func (m *Monitor) Snapshot() *Snapshot {
 
 // Run ticks every interval until ctx is cancelled.
 func (m *Monitor) Run(ctx context.Context) {
-	m.emit(Event{Time: time.Now(), Key: "tweedel", Level: LevelInfo, Code: "started",
+	m.emit(Event{Time: time.Now(), Key: "tweedle", Level: LevelInfo, Code: "started",
 		Params: map[string]string{"server": m.cfg.Name}})
 	// Give the CPU counters primed in New a moment as a base for the first sample.
 	select {
@@ -134,6 +140,12 @@ func (m *Monitor) Tick() *Snapshot {
 		}
 	}
 
+	if len(m.cfg.Certs.Targets) > 0 {
+		cs, cSamples := m.certs.check()
+		snap.Certs = cs
+		samples = append(samples, cSamples...)
+	}
+
 	for _, s := range samples {
 		events = append(events, m.tracker.Observe(s)...)
 	}
@@ -146,10 +158,16 @@ func (m *Monitor) Tick() *Snapshot {
 	for i := range snap.Containers {
 		snap.Containers[i].Level = snap.Levels["container:"+snap.Containers[i].Name]
 	}
+	for i := range snap.Certs {
+		snap.Certs[i].Level = snap.Levels["cert:"+snap.Certs[i].Name]
+	}
 
 	m.mu.Lock()
 	m.snap = snap
 	m.mu.Unlock()
+	if m.OnTick != nil {
+		m.OnTick(snap)
+	}
 
 	sort.SliceStable(events, func(i, j int) bool { return events[i].Level.rank() > events[j].Level.rank() })
 	for _, e := range events {

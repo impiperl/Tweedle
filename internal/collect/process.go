@@ -34,7 +34,7 @@ func NewProcessCollector() *ProcessCollector {
 	return &ProcessCollector{cache: map[int32]cachedProc{}, self: int32(os.Getpid())}
 }
 
-// List returns all user-space processes (kernel threads and Tweedel itself
+// List returns all user-space processes (kernel threads and Tweedle itself
 // are left out). withUser additionally resolves the owner, which is slower.
 func (c *ProcessCollector) List(withUser bool) ([]ProcInfo, error) {
 	pids, err := process.Pids()

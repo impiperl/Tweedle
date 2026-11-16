@@ -1,4 +1,4 @@
-// Package config loads and saves the Tweedel configuration file.
+// Package config loads and saves the Tweedle configuration file.
 package config
 
 import (
@@ -11,7 +11,7 @@ import (
 )
 
 // DefaultPath is where the service looks for its configuration.
-const DefaultPath = "/etc/tweedel/config.yaml"
+const DefaultPath = "/etc/tweedle/config.yaml"
 
 // Limit is a threshold pair in percent (or absolute for load per core).
 // A value of 0 disables that level. For, if set, is how long the value has
@@ -44,9 +44,43 @@ type Container struct {
 	Name string `yaml:"name"`
 }
 
+// CertTarget is a TLS certificate to watch: either a server (Host, as
+// host:port) or a PEM file (File).
+type CertTarget struct {
+	Name string `yaml:"name"`
+	Host string `yaml:"host,omitempty"`
+	File string `yaml:"file,omitempty"`
+	// Verify checks chain and host name (default true). Set to false for
+	// self-made certificates such as mkcert.
+	Verify *bool `yaml:"verify,omitempty"`
+}
+
+// ShouldVerify reports whether chain and host name are verified.
+func (t CertTarget) ShouldVerify() bool { return t.Verify == nil || *t.Verify }
+
+type Certs struct {
+	CheckEvery time.Duration `yaml:"check_every"`
+	WarnDays   int           `yaml:"warn_days"`
+	ErrorDays  int           `yaml:"error_days"`
+	Targets    []CertTarget  `yaml:"targets"`
+}
+
+type Retention struct {
+	Metrics time.Duration `yaml:"metrics"`
+	Events  time.Duration `yaml:"events"`
+}
+
 type Config struct {
 	// Name is shown in the app and in every push message.
 	Name string `yaml:"name"`
+	// Listen is the address of the HTTP API. nginx forwards /mon/ to it.
+	Listen string `yaml:"listen"`
+	// PublicURL is how the app reaches this server (shown in the pairing QR
+	// code), e.g. https://gaistnet.com/mon
+	PublicURL string `yaml:"public_url"`
+	// DataDir holds the SQLite database.
+	DataDir   string    `yaml:"data_dir"`
+	Retention Retention `yaml:"retention"`
 	// Lang is used for terminal output (de or en).
 	Lang     string        `yaml:"lang"`
 	Interval time.Duration `yaml:"interval"`
@@ -60,6 +94,7 @@ type Config struct {
 	Thresholds Thresholds  `yaml:"thresholds"`
 	Processes  []Process   `yaml:"processes"`
 	Containers []Container `yaml:"containers"`
+	Certs      Certs       `yaml:"certs"`
 }
 
 // Default returns a configuration with the agreed default values.
@@ -67,6 +102,9 @@ func Default() *Config {
 	host, _ := os.Hostname()
 	return &Config{
 		Name:      host,
+		Listen:    "127.0.0.1:9300",
+		DataDir:   "/var/lib/tweedle",
+		Retention: Retention{Metrics: 7 * 24 * time.Hour, Events: 90 * 24 * time.Hour},
 		Lang:      "de",
 		Interval:  15 * time.Second,
 		FailAfter: 3,
@@ -79,6 +117,7 @@ func Default() *Config {
 			Inodes:      Limit{Warn: 80, Error: 90},
 			LoadPerCore: Limit{Warn: 2},
 		},
+		Certs: Certs{CheckEvery: time.Hour, WarnDays: 14, ErrorDays: 3},
 	}
 }
 
@@ -120,6 +159,25 @@ func (c *Config) Validate() error {
 	if c.Lang != "de" && c.Lang != "en" {
 		return fmt.Errorf("lang must be de or en")
 	}
+	if c.Listen == "" || c.DataDir == "" {
+		return fmt.Errorf("listen and data_dir are required")
+	}
+	if c.Retention.Metrics < time.Hour || c.Retention.Events < time.Hour {
+		return fmt.Errorf("retention values must be at least 1h")
+	}
+	if c.Certs.CheckEvery < time.Minute {
+		return fmt.Errorf("certs.check_every must be at least 1m")
+	}
+	certNames := map[string]bool{}
+	for i, t := range c.Certs.Targets {
+		if t.Name == "" || (t.Host == "") == (t.File == "") {
+			return fmt.Errorf("certs.targets[%d]: name and exactly one of host or file are required", i)
+		}
+		if certNames[t.Name] {
+			return fmt.Errorf("certs.targets: name %q used twice", t.Name)
+		}
+		certNames[t.Name] = true
+	}
 	seen := map[string]bool{}
 	for i, p := range c.Processes {
 		if p.Name == "" || p.Exe == "" {
@@ -136,9 +194,12 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-const header = `# Tweedel configuration. Created by "tweedel setup", may be edited by hand.
-# After a change: sudo systemctl restart tweedel
+const header = `# Tweedle configuration. Created by "tweedle setup", may be edited by hand.
+# After a change: sudo systemctl restart tweedle
 `
+
+// DBPath is the location of the SQLite database.
+func (c *Config) DBPath() string { return filepath.Join(c.DataDir, "tweedle.db") }
 
 // Save writes the configuration to path, creating the directory if needed.
 func (c *Config) Save(path string) error {

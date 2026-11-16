@@ -1,4 +1,4 @@
-// Package i18n holds the texts Tweedel produces itself (terminal, push
+// Package i18n holds the texts Tweedle produces itself (terminal, push
 // messages) in German and English. Events carry a code plus parameters and
 // are rendered per receiver language.
 package i18n
@@ -11,7 +11,7 @@ import (
 var texts = map[string]map[string]string{
 	"de": {
 		// events
-		"started":             "Tweedel auf {server} gestartet",
+		"started":             "Tweedle auf {server} gestartet",
 		"recovered":           "{label}: wieder in Ordnung",
 		"flapping":            "{label} wechselt ständig den Zustand, Meldungen pausiert",
 		"flapping_end":        "{label} ist wieder stabil",
@@ -28,6 +28,10 @@ var texts = map[string]map[string]string{
 		"container_unhealthy": "Container {what} ist unhealthy",
 		"container_restarted": "Container {what} wurde neu gestartet",
 		"podman_failed":       "podman-Abfrage fehlgeschlagen: {error}",
+		"cert_expiring":       "Zertifikat {what} läuft in {days} Tagen ab ({date})",
+		"cert_expired":        "Zertifikat {what} ist seit {date} abgelaufen",
+		"cert_invalid":        "Zertifikat {what} ist ungültig: {error}",
+		"cert_failed":         "Zertifikat {what} nicht prüfbar: {error}",
 		// labels (what a check is about)
 		"lbl_cpu":       "CPU",
 		"lbl_mem":       "RAM",
@@ -38,13 +42,14 @@ var texts = map[string]map[string]string{
 		"lbl_proc":      "Prozess {what}",
 		"lbl_container": "Container {what}",
 		"lbl_podman":    "podman",
+		"lbl_cert":      "Zertifikat {what}",
 		// levels
 		"level_info":  "INFO",
 		"level_warn":  "WARN",
 		"level_error": "FEHLER",
 		"level_ok":    "OK",
 		// setup
-		"setup_title":       "Tweedel – was soll überwacht werden?",
+		"setup_title":       "Tweedle – was soll überwacht werden?",
 		"setup_help":        "↑/↓ bewegen · Leertaste an/aus · / suchen · Enter speichern · q abbrechen",
 		"setup_filter":      "Suche: ",
 		"setup_containers":  "Container",
@@ -54,14 +59,23 @@ var texts = map[string]map[string]string{
 		"setup_saved":       "Gespeichert: {path}",
 		"setup_aborted":     "Abgebrochen, nichts gespeichert.",
 		"setup_podman_err":  "Container konnten nicht gelesen werden: {error}",
-		"setup_restart":     "Läuft der Dienst schon, danach: sudo systemctl restart tweedel",
+		"setup_restart":     "Läuft der Dienst schon, danach: sudo systemctl restart tweedle",
 		// status
 		"status_processes":  "Prozesse",
 		"status_containers": "Container",
+		"status_certs":      "Zertifikate",
+		"status_days":       "noch {days} Tage",
+		"status_expired":    "abgelaufen",
 		"status_none":       "(keine ausgewählt)",
+		// pair, devices
+		"pair_no_url":       "public_url fehlt in der Config (oder --url angeben), z. B. https://gaistnet.com/mon",
+		"pair_info":         "Server {name} · {url}\nCode zum Abtippen: {code} · gültig bis {time}, nur einmal verwendbar",
+		"devices_none":      "Keine Geräte gekoppelt.",
+		"devices_removed":   "Gerät {id} entfernt.",
+		"devices_not_found": "Gerät {id} nicht gefunden.",
 	},
 	"en": {
-		"started":             "Tweedel started on {server}",
+		"started":             "Tweedle started on {server}",
 		"recovered":           "{label}: back to normal",
 		"flapping":            "{label} keeps changing state, messages paused",
 		"flapping_end":        "{label} is stable again",
@@ -78,6 +92,10 @@ var texts = map[string]map[string]string{
 		"container_unhealthy": "Container {what} is unhealthy",
 		"container_restarted": "Container {what} was restarted",
 		"podman_failed":       "podman query failed: {error}",
+		"cert_expiring":       "Certificate {what} expires in {days} days ({date})",
+		"cert_expired":        "Certificate {what} expired on {date}",
+		"cert_invalid":        "Certificate {what} is invalid: {error}",
+		"cert_failed":         "Certificate {what} could not be checked: {error}",
 		"lbl_cpu":             "CPU",
 		"lbl_mem":             "RAM",
 		"lbl_swap":            "Swap",
@@ -87,11 +105,12 @@ var texts = map[string]map[string]string{
 		"lbl_proc":            "Process {what}",
 		"lbl_container":       "Container {what}",
 		"lbl_podman":          "podman",
+		"lbl_cert":            "Certificate {what}",
 		"level_info":          "INFO",
 		"level_warn":          "WARN",
 		"level_error":         "ERROR",
 		"level_ok":            "OK",
-		"setup_title":         "Tweedel – what should be watched?",
+		"setup_title":         "Tweedle – what should be watched?",
 		"setup_help":          "↑/↓ move · space toggle · / search · enter save · q cancel",
 		"setup_filter":        "Search: ",
 		"setup_containers":    "Containers",
@@ -101,10 +120,18 @@ var texts = map[string]map[string]string{
 		"setup_saved":         "Saved: {path}",
 		"setup_aborted":       "Cancelled, nothing saved.",
 		"setup_podman_err":    "Could not read containers: {error}",
-		"setup_restart":       "If the service is already running: sudo systemctl restart tweedel",
+		"setup_restart":       "If the service is already running: sudo systemctl restart tweedle",
 		"status_processes":    "Processes",
 		"status_containers":   "Containers",
+		"status_certs":        "Certificates",
+		"status_days":         "{days} days left",
+		"status_expired":      "expired",
 		"status_none":         "(none selected)",
+		"pair_no_url":         "public_url is missing in the config (or pass --url), e.g. https://gaistnet.com/mon",
+		"pair_info":           "Server {name} · {url}\nCode to type in: {code} · valid until {time}, single use",
+		"devices_none":        "No devices paired.",
+		"devices_removed":     "Device {id} removed.",
+		"devices_not_found":   "Device {id} not found.",
 	},
 }
 

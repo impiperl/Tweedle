@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# Installs or updates Tweedle on Dev and adds /mon/ to nginx.
-# Run from the repo:  sudo deploy/install-dev.sh
+# Installs or updates Tweedle and adds /mon/ to nginx.
+# Run from the repo:  sudo deploy/install.sh dev|prod
 # Safe to run again: the config and an existing /mon/ block are kept.
+# Without go on the server, build on another machine and copy the binary
+# next to this repo as ./tweedle:  CGO_ENABLED=0 go build -o tweedle ./cmd/tweedle
 set -euo pipefail
 
+ENV="${1:-}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 BIN=/usr/local/bin/tweedle
 CONF=/etc/tweedle/config.yaml
@@ -11,23 +14,39 @@ UNIT=/etc/systemd/system/tweedle.service
 NGINX_CONF=/root/pods/nginx/nginx.conf
 NGINX_CONTAINER=image-server
 NGINX_START=/root/pods/nginx/start-nginx-container.sh
-HEALTH_URL=http://127.0.0.1/mon/health
 
 step() { printf '\n== %s\n' "$*"; }
 die() { printf 'FEHLER: %s\n' "$*" >&2; exit 1; }
 
-[[ $EUID -eq 0 ]] || die "bitte mit sudo starten: sudo $0"
+case "$ENV" in
+  dev)
+    # Dev has one plain-HTTP server block.
+    WANT_SSL=0
+    health() { curl -fsS -m 3 http://127.0.0.1/mon/health; }
+    ;;
+  prod)
+    # Prod: the block goes into the HTTPS server block.
+    WANT_SSL=1
+    health() { curl -fsS -m 3 --resolve gaistnet.com:443:127.0.0.1 https://gaistnet.com/mon/health; }
+    ;;
+  *) die "Aufruf: sudo $0 dev|prod" ;;
+esac
+
+[[ $EUID -eq 0 ]] || die "bitte mit sudo starten: sudo $0 $ENV"
 cd "$REPO"
 [[ -x "$NGINX_START" ]] || die "$NGINX_START fehlt"
 
 step "Bauen"
-if [[ -n "${SUDO_USER:-}" ]] && sudo -u "$SUDO_USER" bash -lc 'command -v go' >/dev/null; then
-  sudo -u "$SUDO_USER" bash -lc "cd '$REPO' && go build -o tweedle ./cmd/tweedle"
+if [[ -n "${SUDO_USER:-}" ]] && sudo -u "$SUDO_USER" bash -lc 'command -v go' >/dev/null 2>&1; then
+  sudo -u "$SUDO_USER" bash -lc "cd '$REPO' && CGO_ENABLED=0 go build -o tweedle ./cmd/tweedle"
   echo "gebaut als $SUDO_USER"
+elif command -v go >/dev/null 2>&1; then
+  CGO_ENABLED=0 go build -o tweedle ./cmd/tweedle
+  echo "gebaut als root"
 elif [[ -x ./tweedle ]]; then
   echo "kein go gefunden, nehme das vorhandene ./tweedle"
 else
-  die "kein ./tweedle und kein go: erst 'go build -o tweedle ./cmd/tweedle'"
+  die "kein ./tweedle und kein go: woanders 'CGO_ENABLED=0 go build -o tweedle ./cmd/tweedle' und hierher kopieren"
 fi
 
 step "Programm nach $BIN"
@@ -38,8 +57,8 @@ step "Config $CONF"
 if [[ -f "$CONF" ]]; then
   echo "vorhanden, bleibt wie sie ist"
 else
-  install -D -m 600 deploy/dev.yaml "$CONF"
-  echo "angelegt aus deploy/dev.yaml - jetzt 'sudo $BIN setup' ausführen und das Skript erneut starten"
+  install -D -m 600 "deploy/$ENV.yaml" "$CONF"
+  echo "angelegt aus deploy/$ENV.yaml - jetzt 'sudo $BIN setup' ausführen und das Skript erneut starten"
   exit 0
 fi
 
@@ -64,14 +83,19 @@ else
   echo "Sicherung: $backup"
   tmp="$(mktemp)"
   # Insert the block (indented) before the first "location /api/ {" and the
-  # comment lines directly above it.
-  LC_ALL=C awk -v blk="$REPO/deploy/nginx-mon.conf" '
+  # comment lines directly above it; with WANT_SSL=1 only inside a server
+  # block that listens on 443.
+  LC_ALL=C awk -v blk="$REPO/deploy/nginx-mon.conf" -v want_ssl="$WANT_SSL" '
     BEGIN { while ((getline l < blk) > 0) b = b (l == "" ? "" : "        " l) "\n" }
+    /^[[:space:]]*server[[:space:]]*\{/ { ssl = 0 }
+    /^[[:space:]]*listen[[:space:]].*443/ { ssl = 1 }
     /^[[:space:]]*#/ { pend = pend $0 "\n"; next }
-    !done && /^[[:space:]]*location \/api\/ \{/ { printf "%s\n", b; done = 1 }
+    !done && (!want_ssl || ssl) && /^[[:space:]]*location \/api\/ \{/ { printf "%s\n", b; done = 1 }
     { printf "%s", pend; pend = ""; print }
     END { printf "%s", pend; if (!done) exit 3 }
-  ' "$NGINX_CONF" > "$tmp" || { rm -f "$tmp"; die "'location /api/ {' nicht gefunden, nginx.conf unverändert"; }
+  ' "$NGINX_CONF" > "$tmp" || { rm -f "$tmp"; die "passendes 'location /api/ {' nicht gefunden, nginx.conf unverändert"; }
+  echo "--- Einfügestelle:"
+  diff "$NGINX_CONF" "$tmp" | head -5 || true
   # Test a copy inside the running container first (relative includes made absolute).
   sed 's|include mime.types;|include /usr/local/openresty/nginx/conf/mime.types;|' "$tmp" |
     podman exec -i "$NGINX_CONTAINER" sh -c 'cat > /tmp/mon-test.conf'
@@ -88,9 +112,9 @@ else
   "$NGINX_START"
 fi
 
-step "Test $HEALTH_URL"
+step "Test /mon/health"
 for _ in $(seq 1 20); do
-  if out="$(curl -fsS -m 3 "$HEALTH_URL" 2>/dev/null)"; then
+  if out="$(health 2>/dev/null)"; then
     echo "$out"
     printf '\nFertig. Koppeln mit Dee:  sudo %s pair\n' "$BIN"
     exit 0
@@ -98,4 +122,4 @@ for _ in $(seq 1 20); do
   sleep 1
 done
 journalctl -u tweedle -n 10 --no-pager
-die "keine Antwort von $HEALTH_URL"
+die "keine Antwort von /mon/health"

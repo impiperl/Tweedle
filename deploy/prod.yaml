@@ -1,0 +1,11 @@
+name: Prod
+listen: podman:gaistnet:9300
+public_url: https://gaistnet.com/mon
+data_dir: /var/lib/tweedle
+lang: de
+certs:
+  targets:
+    - name: gaistnet.com
+      host: gaistnet.com
+    - name: perl.team
+      host: perl.team

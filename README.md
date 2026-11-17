@@ -65,29 +65,34 @@ stripped. Everything except `/health` and `/api/pair` needs
 `--config PATH` uses another config file. For testing as a normal user,
 `podman_cmd: [sudo, -n, podman]` in the config reads the root containers.
 
-## Install (Dev)
+## Install
 
-`sudo deploy/install-dev.sh` does all of this (build, install, config if
+`sudo deploy/install.sh dev` or `sudo deploy/install.sh prod` does all of
+this (build, install, config from `deploy/dev.yaml` or `deploy/prod.yaml` if
 missing, service, nginx block with backup, test copy and
-`/root/pods/nginx/start-nginx-container.sh`, health check)
-and can be run again after changes. By hand:
+`/root/pods/nginx/start-nginx-container.sh`, health check) and can be run
+again after changes. On Dev the block goes before the first `location /api/ {`,
+on Prod before the first one in the server block that listens on 443.
+Without go on the server, build elsewhere with
+`CGO_ENABLED=0 go build -o tweedle ./cmd/tweedle` and copy `tweedle` into the
+repo directory there; the script then uses it. By hand:
 
 sudo on RHEL does not search `/usr/local/bin`, hence the full path.
-`deploy/` holds the systemd unit, the Dev config and the nginx block. With
+`deploy/` holds the systemd unit, the Dev and Prod configs and the nginx block. With
 `listen: podman:gaistnet:9300` Tweedle looks up the gateway of the podman
 network `gaistnet` at start and listens there; the nginx container reaches it
 as `host.containers.internal`, the LAN does not. The same config works on
 every server whose nginx container is in that network.
 
 ```bash
-go build -o tweedle ./cmd/tweedle
+CGO_ENABLED=0 go build -o tweedle ./cmd/tweedle
 sudo install -m 755 tweedle /usr/local/bin/tweedle
-sudo install -D -m 600 deploy/dev.yaml /etc/tweedle/config.yaml
+sudo install -D -m 600 deploy/dev.yaml /etc/tweedle/config.yaml   # or prod.yaml
 sudo /usr/local/bin/tweedle setup                     # choose processes and containers
 sudo install -m 644 deploy/tweedle.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now tweedle
 # nginx: add deploy/nginx-mon.conf to the server block, then (reload is not enough)
 sudo /root/pods/nginx/start-nginx-container.sh
-curl http://192.168.0.115/mon/health
+curl http://192.168.0.115/mon/health                 # Prod: https://gaistnet.com/mon/health
 sudo /usr/local/bin/tweedle pair                      # QR code for Dee
 ```

@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -102,6 +104,8 @@ type Config struct {
 	// Name is shown in the app and in every push message.
 	Name string `yaml:"name"`
 	// Listen is the address of the HTTP API. nginx forwards /mon/ to it.
+	// "podman:NETWORK:PORT" listens on the gateway of that podman network,
+	// which the nginx container reaches as host.containers.internal.
 	Listen string `yaml:"listen"`
 	// PublicURL is how the app reaches this server (shown in the pairing QR
 	// code), e.g. https://gaistnet.com/mon
@@ -195,6 +199,9 @@ func (c *Config) Validate() error {
 	if c.Listen == "" || c.DataDir == "" {
 		return fmt.Errorf("listen and data_dir are required")
 	}
+	if _, _, ok, err := c.ListenPodman(); ok && err != nil {
+		return err
+	}
 	if c.Retention.Metrics < time.Hour || c.Retention.Events < time.Hour {
 		return fmt.Errorf("retention values must be at least 1h")
 	}
@@ -247,6 +254,23 @@ func (c *Config) Validate() error {
 const header = `# Tweedle configuration. Created by "tweedle setup", may be edited by hand.
 # After a change: sudo systemctl restart tweedle
 `
+
+// ListenPodman reports whether Listen has the form podman:NETWORK:PORT and
+// returns network and port.
+func (c *Config) ListenPodman() (network, port string, ok bool, err error) {
+	rest, ok := strings.CutPrefix(c.Listen, "podman:")
+	if !ok {
+		return "", "", false, nil
+	}
+	network, port, found := strings.Cut(rest, ":")
+	if !found || network == "" || port == "" {
+		return "", "", true, fmt.Errorf("listen: expected podman:NETWORK:PORT, got %q", c.Listen)
+	}
+	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+		return "", "", true, fmt.Errorf("listen: invalid port in %q", c.Listen)
+	}
+	return network, port, true, nil
+}
 
 // DBPath is the location of the SQLite database.
 func (c *Config) DBPath() string { return filepath.Join(c.DataDir, "tweedle.db") }

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"sort"
@@ -18,6 +19,7 @@ import (
 	"github.com/mdp/qrterminal/v3"
 
 	"github.com/impiperl/Tweedle/internal/api"
+	"github.com/impiperl/Tweedle/internal/collect"
 	"github.com/impiperl/Tweedle/internal/config"
 	"github.com/impiperl/Tweedle/internal/i18n"
 	"github.com/impiperl/Tweedle/internal/monitor"
@@ -101,9 +103,28 @@ func runSetup(path string) error {
 	return nil
 }
 
+// resolveListen turns "podman:NETWORK:PORT" into the gateway address of that
+// network. The network has to exist; if its bridge is not up yet, listening
+// fails and systemd starts tweedle again.
+func resolveListen(cfg *config.Config) error {
+	network, port, ok, err := cfg.ListenPodman()
+	if !ok || err != nil {
+		return err
+	}
+	gw, err := collect.PodmanGateway(cfg.PodmanCmd, network)
+	if err != nil {
+		return err
+	}
+	cfg.Listen = net.JoinHostPort(gw, port)
+	return nil
+}
+
 func runServe(path string) error {
 	cfg, err := config.Load(path)
 	if err != nil {
+		return err
+	}
+	if err := resolveListen(cfg); err != nil {
 		return err
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

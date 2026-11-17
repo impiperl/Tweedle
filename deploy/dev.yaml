@@ -1,0 +1,14 @@
+# Tweedle on Dev (192.168.0.115). Copy to /etc/tweedle/config.yaml, then
+# "sudo tweedle setup" adds the processes and containers.
+name: Dev
+# Gateway of the podman network "gaistnet" (looked up at start): reachable
+# from the nginx container as host.containers.internal, not from the LAN.
+listen: podman:gaistnet:9300
+public_url: http://192.168.0.115/mon
+data_dir: /var/lib/tweedle
+lang: de
+endpoints:
+  # Prod watcher, switched off by default: set enabled: true to use it.
+  - name: Prod
+    url: https://gaistnet.com/mon/health
+    enabled: false

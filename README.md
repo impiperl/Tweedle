@@ -64,3 +64,30 @@ stripped. Everything except `/health` and `/api/pair` needs
 
 `--config PATH` uses another config file. For testing as a normal user,
 `podman_cmd: [sudo, -n, podman]` in the config reads the root containers.
+
+## Install (Dev)
+
+`sudo deploy/install-dev.sh` does all of this (build, install, config if
+missing, service, nginx block with backup, test copy and
+`/root/pods/nginx/start-nginx-container.sh`, health check)
+and can be run again after changes. By hand:
+
+sudo on RHEL does not search `/usr/local/bin`, hence the full path.
+`deploy/` holds the systemd unit, the Dev config and the nginx block. With
+`listen: podman:gaistnet:9300` Tweedle looks up the gateway of the podman
+network `gaistnet` at start and listens there; the nginx container reaches it
+as `host.containers.internal`, the LAN does not. The same config works on
+every server whose nginx container is in that network.
+
+```bash
+go build -o tweedle ./cmd/tweedle
+sudo install -m 755 tweedle /usr/local/bin/tweedle
+sudo install -D -m 600 deploy/dev.yaml /etc/tweedle/config.yaml
+sudo /usr/local/bin/tweedle setup                     # choose processes and containers
+sudo install -m 644 deploy/tweedle.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now tweedle
+# nginx: add deploy/nginx-mon.conf to the server block, then (reload is not enough)
+sudo /root/pods/nginx/start-nginx-container.sh
+curl http://192.168.0.115/mon/health
+sudo /usr/local/bin/tweedle pair                      # QR code for Dee
+```

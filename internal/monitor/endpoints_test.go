@@ -66,9 +66,8 @@ func TestEndpointDisabled(t *testing.T) {
 	}
 }
 
-func TestDefaultProdWatcherOff(t *testing.T) {
-	d := config.Default()
-	if len(d.Endpoints) != 1 || d.Endpoints[0].Enabled {
-		t.Fatalf("default should contain the Prod watcher switched off: %+v", d.Endpoints)
+func TestDefaultHasNoEndpoints(t *testing.T) {
+	if d := config.Default(); len(d.Endpoints) != 0 {
+		t.Fatalf("default should watch no other server: %+v", d.Endpoints)
 	}
 }

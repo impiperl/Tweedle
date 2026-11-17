@@ -1,5 +1,6 @@
-// Command tweedle is the monitoring agent: "setup" chooses what to watch,
-// "serve" runs the checks, "status" prints the current state once.
+// Command tweedle is the monitoring agent: "install" sets it up as a
+// service, "setup" chooses what to watch, "serve" runs the checks, "status"
+// prints the current state once.
 package main
 
 import (
@@ -22,6 +23,7 @@ import (
 	"github.com/impiperl/Tweedle/internal/collect"
 	"github.com/impiperl/Tweedle/internal/config"
 	"github.com/impiperl/Tweedle/internal/i18n"
+	"github.com/impiperl/Tweedle/internal/install"
 	"github.com/impiperl/Tweedle/internal/monitor"
 	"github.com/impiperl/Tweedle/internal/push"
 	"github.com/impiperl/Tweedle/internal/setup"
@@ -33,6 +35,7 @@ var version = "dev"
 func usage() {
 	fmt.Fprintf(os.Stderr, `tweedle %s
 
+  tweedle install [--config PATH]  set up or change: questions, config, systemd service
   tweedle setup  [--config PATH]   choose processes and containers to watch
   tweedle serve  [--config PATH]   run the checks (systemd service)
   tweedle status [--config PATH]   print the current state once
@@ -58,6 +61,8 @@ func main() {
 
 	var err error
 	switch cmd {
+	case "install":
+		err = install.Run(*cfgPath, os.Stdin, os.Stdout)
 	case "setup":
 		err = runSetup(*cfgPath)
 	case "serve":

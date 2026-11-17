@@ -6,7 +6,7 @@ func TestPodmanGateway(t *testing.T) {
 	// The fake "podman" prints like `network inspect --format`; the real
 	// arguments end up as $1… and are ignored.
 	fake := func(out string) []string { return []string{"sh", "-c", "echo '" + out + "'", "sh"} }
-	gw, err := PodmanGateway(fake("fd00::1 10.89.0.1 "), "gaistnet")
+	gw, err := PodmanGateway(fake("fd00::1 10.89.0.1 "), "mynet")
 	if err != nil || gw != "10.89.0.1" {
 		t.Fatalf("got %q, %v", gw, err)
 	}

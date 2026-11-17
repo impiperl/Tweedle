@@ -1,11 +1,13 @@
-// Package api is the HTTP interface used by the Dee app. nginx forwards
-// /mon/ to it with the prefix stripped, so routes start at "/".
+// Package api is the HTTP interface used by the Dee app. A web server in
+// front may forward a path prefix to it with the prefix stripped, so routes
+// start at "/".
 package api
 
 import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -103,8 +105,19 @@ func (s *Server) Run(ctx context.Context) error {
 		defer cancel()
 		_ = srv.Shutdown(sh)
 	}()
-	go s.pruneLoop(ctx)
-	err := srv.ListenAndServe()
+	var err error
+	if s.cfg.TLSCert != "" {
+		r, lerr := newCertReloader(s.cfg.TLSCert, s.cfg.TLSKey)
+		if lerr != nil {
+			return lerr
+		}
+		srv.TLSConfig = &tls.Config{GetCertificate: r.get, MinVersion: tls.VersionTLS12}
+		go s.pruneLoop(ctx)
+		err = srv.ListenAndServeTLS("", "")
+	} else {
+		go s.pruneLoop(ctx)
+		err = srv.ListenAndServe()
+	}
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}

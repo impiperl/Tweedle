@@ -68,7 +68,7 @@ type Certs struct {
 	Targets    []CertTarget  `yaml:"targets"`
 }
 
-// Endpoint is a URL that must answer, e.g. another server's /mon/health.
+// Endpoint is a URL that must answer, e.g. https://other.example.com/tweedle/health.
 // Only entries with enabled: true are checked.
 type Endpoint struct {
 	Name    string `yaml:"name"`
@@ -103,12 +103,17 @@ type Push struct {
 type Config struct {
 	// Name is shown in the app and in every push message.
 	Name string `yaml:"name"`
-	// Listen is the address of the HTTP API. nginx forwards /mon/ to it.
-	// "podman:NETWORK:PORT" listens on the gateway of that podman network,
-	// which the nginx container reaches as host.containers.internal.
+	// Listen is the address of the HTTP API: 127.0.0.1:PORT behind a web
+	// server, :PORT when the app connects directly. "podman:NETWORK:PORT"
+	// listens on the gateway of that podman network, for a web server running
+	// in a container (it reaches the host as host.containers.internal).
 	Listen string `yaml:"listen"`
+	// TLSCert and TLSKey switch the API to HTTPS (PEM files, e.g. from
+	// Let's Encrypt). Renewed files are picked up without a restart.
+	TLSCert string `yaml:"tls_cert,omitempty"`
+	TLSKey  string `yaml:"tls_key,omitempty"`
 	// PublicURL is how the app reaches this server (shown in the pairing QR
-	// code), e.g. https://gaistnet.com/mon
+	// code), e.g. https://example.com/tweedle
 	PublicURL string `yaml:"public_url"`
 	// DataDir holds the SQLite database.
 	DataDir   string    `yaml:"data_dir"`
@@ -152,9 +157,7 @@ func Default() *Config {
 			LoadPerCore: Limit{Warn: 2},
 		},
 		Certs: Certs{CheckEvery: time.Hour, WarnDays: 14, ErrorDays: 3},
-		// Prod watcher: switched off; set enabled: true on Dev.
-		Endpoints: []Endpoint{{Name: "Prod", URL: "https://gaistnet.com/mon/health"}},
-		Push:      Push{Enabled: true, Debounce: 3 * time.Second},
+		Push:  Push{Enabled: true, Debounce: 3 * time.Second},
 	}
 }
 
@@ -201,6 +204,9 @@ func (c *Config) Validate() error {
 	}
 	if _, _, ok, err := c.ListenPodman(); ok && err != nil {
 		return err
+	}
+	if (c.TLSCert == "") != (c.TLSKey == "") {
+		return fmt.Errorf("tls_cert and tls_key must be set together")
 	}
 	if c.Retention.Metrics < time.Hour || c.Retention.Events < time.Hour {
 		return fmt.Errorf("retention values must be at least 1h")
@@ -251,7 +257,7 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-const header = `# Tweedle configuration. Created by "tweedle setup", may be edited by hand.
+const header = `# Tweedle configuration. Created by "tweedle install", may be edited by hand.
 # After a change: sudo systemctl restart tweedle
 `
 

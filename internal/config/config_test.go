@@ -9,10 +9,10 @@ func TestListenPodman(t *testing.T) {
 		ok, bad       bool
 	}{
 		{"127.0.0.1:9300", "", "", false, false},
-		{"podman:gaistnet:9300", "gaistnet", "9300", true, false},
-		{"podman:gaistnet", "", "", true, true},
+		{"podman:mynet:9300", "mynet", "9300", true, false},
+		{"podman:mynet", "", "", true, true},
 		{"podman::9300", "", "", true, true},
-		{"podman:gaistnet:99999", "", "", true, true},
+		{"podman:mynet:99999", "", "", true, true},
 	}
 	for _, tc := range cases {
 		c := Default()

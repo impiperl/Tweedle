@@ -106,6 +106,66 @@ func TestLiveSendsStatusAndEvents(t *testing.T) {
 	}
 }
 
+// liveConn opens /api/live and reads the first (status) message.
+func liveConn(t *testing.T, ctx context.Context, ts *httptest.Server, tok string) *websocket.Conn {
+	t.Helper()
+	url := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/live"
+	conn, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer " + tok}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn.CloseNow() })
+	if _, _, err := conn.Read(ctx); err != nil {
+		t.Fatal(err)
+	}
+	return conn
+}
+
+// waitClosed reads until the server closes the connection.
+func waitClosed(t *testing.T, ctx context.Context, conn *websocket.Conn) {
+	t.Helper()
+	for {
+		_, _, err := conn.Read(ctx)
+		if err == nil {
+			continue
+		}
+		if websocket.CloseStatus(err) != websocket.StatusPolicyViolation {
+			t.Fatalf("expected close by server, got %v", err)
+		}
+		return
+	}
+}
+
+func TestLiveClosedWhenDeviceUnpairs(t *testing.T) {
+	_, st, ts := newTestServer(t)
+	tok := pair(t, st, ts, "en")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn := liveConn(t, ctx, ts, tok)
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/device", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	waitClosed(t, ctx, conn)
+}
+
+func TestLiveClosedWhenDeviceRemovedElsewhere(t *testing.T) {
+	srv, st, ts := newTestServer(t)
+	srv.livePing = 50 * time.Millisecond
+	tok := pair(t, st, ts, "en")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn := liveConn(t, ctx, ts, tok)
+	devs, _ := st.Devices()
+	if _, err := st.DeleteDevice(devs[0].ID); err != nil { // like "tweedle devices rm"
+		t.Fatal(err)
+	}
+	waitClosed(t, ctx, conn)
+}
+
 func TestLiveRequiresToken(t *testing.T) {
 	_, _, ts := newTestServer(t)
 	resp, err := http.Get(ts.URL + "/api/live")

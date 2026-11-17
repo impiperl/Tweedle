@@ -44,12 +44,17 @@ func readCert(t config.CertTarget) (*collect.CertInfo, error) {
 
 func (c *certChecker) check() ([]CertStatus, []Sample) {
 	now := c.now()
-	var wg sync.WaitGroup
-	var mu sync.Mutex
+	// Decide what is due before any check starts: the checks write c.last.
+	var due []config.CertTarget
 	for _, t := range c.cfg.Targets {
 		if prev, ok := c.last[t.Name]; ok && prev.Error == "" && now.Sub(prev.Checked) < c.cfg.CheckEvery {
 			continue
 		}
+		due = append(due, t)
+	}
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	for _, t := range due {
 		wg.Add(1)
 		go func(t config.CertTarget) {
 			defer wg.Done()

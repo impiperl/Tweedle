@@ -128,7 +128,7 @@ Routes start at `/`; a web server in front forwards its path (e.g.
 | `GET /api/status` | current snapshot + unseen warn/error count |
 | `GET /api/history?range=1h\|6h\|24h\|7d` | minute values (max. 360 points) |
 | `GET /api/events?before=ID&limit=50&minLevel=warn` | events, newest first, `message` in the device language |
-| `POST /api/events/seen` | `{upTo: ID}` |
+| `POST /api/events/seen` | `{ids: [ID, …]}`: the events the app has shown (per device; `{upTo: ID}` still works) |
 | `GET/PUT/DELETE /api/device` | own settings (`name, lang, pushToken, minLevel`), unpair |
 | `GET /api/live` | WebSocket: `{type:"status"}` every tick, `{type:"event"}` per event |
 

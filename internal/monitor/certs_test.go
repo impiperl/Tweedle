@@ -67,3 +67,27 @@ func TestCertSuccessIsCachedFailureRetried(t *testing.T) {
 		t.Fatalf("failure should be retried every tick: calls=%d code=%s", *fcalls, s[0].Code)
 	}
 }
+
+// Many targets checked in parallel, some cached and some due: run with -race.
+func TestCertParallelChecksNoRace(t *testing.T) {
+	var targets []config.CertTarget
+	for i := 0; i < 20; i++ {
+		targets = append(targets, config.CertTarget{Name: string(rune('a' + i)), Host: "x:443"})
+	}
+	c := &clock{t: time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)}
+	cc := newCertChecker(config.Certs{CheckEvery: time.Hour, WarnDays: 14, ErrorDays: 3, Targets: targets})
+	cc.now = c.now
+	cc.read = func(t config.CertTarget) (*collect.CertInfo, error) {
+		time.Sleep(time.Millisecond)
+		if t.Name[0]%2 == 0 {
+			return nil, errors.New("refused") // retried on every tick
+		}
+		return &collect.CertInfo{NotAfter: time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)}, nil
+	}
+	for i := 0; i < 5; i++ {
+		if st, _ := cc.check(); len(st) != len(targets) {
+			t.Fatalf("got %d results", len(st))
+		}
+		c.add(time.Minute)
+	}
+}

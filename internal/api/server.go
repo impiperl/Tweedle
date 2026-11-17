@@ -31,7 +31,10 @@ type Server struct {
 	version string
 	hub     *hub
 	agg     aggregator
-	pairRL  rateLimiter
+	// livePing is how often an open live connection is pinged and its device
+	// checked again (a device removed with "tweedle devices rm" is cut off then).
+	livePing time.Duration
+	pairRL   rateLimiter
 
 	touchMu sync.Mutex
 	touched map[int64]time.Time
@@ -42,7 +45,7 @@ type Server struct {
 
 func New(cfg *config.Config, st *store.Store, version string) *Server {
 	return &Server{
-		cfg: cfg, store: st, version: version, hub: newHub(),
+		cfg: cfg, store: st, version: version, hub: newHub(), livePing: 30 * time.Second,
 		pairRL:  rateLimiter{max: 10, per: time.Minute},
 		touched: map[int64]time.Time{},
 	}
@@ -184,7 +187,7 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request, d *store.Device) {
-	unseen, _ := s.store.Unseen([]string{"warn", "error"})
+	unseen, _ := s.store.Unseen(d.ID, []string{"warn", "error"})
 	var snap *monitor.Snapshot
 	if s.mon != nil {
 		snap = s.mon.Snapshot()
@@ -222,7 +225,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request, d *store.D
 		limit = 50
 	}
 	levels := levelsFrom(q.Get("minLevel"))
-	evs, err := s.store.Events(before, limit, levels)
+	evs, err := s.store.Events(d.ID, before, limit, levels)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -231,22 +234,32 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request, d *store.D
 	for _, e := range evs {
 		out = append(out, s.eventJSON(e, d.Lang))
 	}
-	unseen, _ := s.store.Unseen([]string{"warn", "error"})
+	unseen, _ := s.store.Unseen(d.ID, []string{"warn", "error"})
 	writeJSON(w, http.StatusOK, map[string]any{"events": out, "unseen": unseen})
 }
 
 func (s *Server) handleSeen(w http.ResponseWriter, r *http.Request, d *store.Device) {
+	// ids: the events the app has shown; upTo (older apps): everything up to it.
 	var req struct {
-		UpTo int64 `json:"upTo"`
+		IDs  []int64 `json:"ids"`
+		UpTo int64   `json:"upTo"`
 	}
 	if !readJSON(w, r, &req) {
 		return
 	}
-	if err := s.store.MarkSeen(req.UpTo); err != nil {
+	if len(req.IDs) > 500 {
+		writeError(w, http.StatusBadRequest, "at most 500 ids")
+		return
+	}
+	err := s.store.MarkSeen(d.ID, req.IDs)
+	if err == nil && req.UpTo > 0 {
+		err = s.store.MarkSeenUpTo(d.ID, req.UpTo)
+	}
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	unseen, _ := s.store.Unseen([]string{"warn", "error"})
+	unseen, _ := s.store.Unseen(d.ID, []string{"warn", "error"})
 	writeJSON(w, http.StatusOK, map[string]any{"unseen": unseen})
 }
 
@@ -294,6 +307,7 @@ func (s *Server) handleDeleteDevice(w http.ResponseWriter, r *http.Request, d *s
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.hub.dropDevice(d.ID)
 	w.WriteHeader(http.StatusNoContent)
 }
 

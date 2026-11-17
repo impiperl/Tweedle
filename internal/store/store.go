@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS events (
 	level   TEXT NOT NULL,             -- info, warn, error
 	code    TEXT NOT NULL,
 	params  TEXT NOT NULL DEFAULT '{}',
-	seen    INTEGER NOT NULL DEFAULT 0
+	seen    INTEGER NOT NULL DEFAULT 0 -- unused since seen is kept per device
 );
 CREATE INDEX IF NOT EXISTS events_time ON events(time);
 
@@ -48,6 +48,13 @@ CREATE TABLE IF NOT EXISTS devices (
 	last_seen   INTEGER NOT NULL
 );
 
+-- Seen is per device: events up to devices.seen_floor, plus the ones listed here.
+CREATE TABLE IF NOT EXISTS event_seen (
+	device_id INTEGER NOT NULL,
+	event_id  INTEGER NOT NULL,
+	PRIMARY KEY (device_id, event_id)
+);
+
 CREATE TABLE IF NOT EXISTS pair_codes (
 	code_hash TEXT PRIMARY KEY,
 	expires   INTEGER NOT NULL
@@ -71,7 +78,29 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("schema: %w", err)
 	}
+	if err := migrate(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
 	return &Store{db: db}, nil
+}
+
+// migrate updates databases created by older versions.
+func migrate(db *sql.DB) error {
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('devices') WHERE name='seen_floor'`).Scan(&n); err != nil {
+		return err
+	}
+	if n == 0 {
+		// Seen used to be one flag for all devices, always set up to an id.
+		if _, err := db.Exec(`ALTER TABLE devices ADD COLUMN seen_floor INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+		if _, err := db.Exec(`UPDATE devices SET seen_floor = COALESCE((SELECT MAX(id) FROM events WHERE seen=1), 0)`); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
@@ -98,11 +127,16 @@ func (s *Store) AddEvent(e Event) (int64, error) {
 	return res.LastInsertId()
 }
 
+// seenBy is true for events the device has seen.
+const seenBy = `(id <= (SELECT seen_floor FROM devices WHERE id=?)
+	OR EXISTS (SELECT 1 FROM event_seen WHERE device_id=? AND event_id=events.id))`
+
 // Events returns up to limit events older than beforeID (0 = newest),
-// newest first, restricted to the given levels (empty = all).
-func (s *Store) Events(beforeID int64, limit int, levels []string) ([]Event, error) {
-	q := `SELECT id,time,key,level,code,params,seen FROM events WHERE 1=1`
-	var args []any
+// newest first, restricted to the given levels (empty = all). Seen is that
+// of the given device.
+func (s *Store) Events(device, beforeID int64, limit int, levels []string) ([]Event, error) {
+	q := `SELECT id,time,key,level,code,params,` + seenBy + ` FROM events WHERE 1=1`
+	args := []any{device, device}
 	if beforeID > 0 {
 		q += ` AND id < ?`
 		args = append(args, beforeID)
@@ -135,16 +169,30 @@ func (s *Store) Events(beforeID int64, limit int, levels []string) ([]Event, err
 	return out, rows.Err()
 }
 
-// MarkSeen marks all events up to and including id as seen.
-func (s *Store) MarkSeen(upToID int64) error {
-	_, err := s.db.Exec(`UPDATE events SET seen=1 WHERE id <= ? AND seen=0`, upToID)
+// MarkSeen marks the given events as seen by the device.
+func (s *Store) MarkSeen(device int64, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	args := []any{device}
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	_, err := s.db.Exec(`INSERT OR IGNORE INTO event_seen(device_id, event_id)
+		SELECT ?, id FROM events WHERE id IN (`+placeholders(len(ids))+`)`, args...)
 	return err
 }
 
-// Unseen counts unseen events of the given levels.
-func (s *Store) Unseen(levels []string) (int, error) {
-	q := `SELECT COUNT(*) FROM events WHERE seen=0`
-	var args []any
+// MarkSeenUpTo marks all events up to and including id as seen by the device.
+func (s *Store) MarkSeenUpTo(device, upToID int64) error {
+	_, err := s.db.Exec(`UPDATE devices SET seen_floor = MAX(seen_floor, ?) WHERE id=?`, upToID, device)
+	return err
+}
+
+// Unseen counts the events of the given levels the device has not seen.
+func (s *Store) Unseen(device int64, levels []string) (int, error) {
+	q := `SELECT COUNT(*) FROM events WHERE NOT ` + seenBy
+	args := []any{device, device}
 	if len(levels) > 0 {
 		q += ` AND level IN (` + placeholders(len(levels)) + `)`
 		for _, l := range levels {
@@ -206,6 +254,9 @@ func (s *Store) Prune(metricsBefore, eventsBefore time.Time) error {
 	if _, err := s.db.Exec(`DELETE FROM events WHERE time < ?`, eventsBefore.UnixMilli()); err != nil {
 		return err
 	}
+	if _, err := s.db.Exec(`DELETE FROM event_seen WHERE event_id NOT IN (SELECT id FROM events)`); err != nil {
+		return err
+	}
 	_, err := s.db.Exec(`DELETE FROM pair_codes WHERE expires < ?`, time.Now().Unix())
 	return err
 }
@@ -245,7 +296,9 @@ func (s *Store) Pair(codeHash, tokenHash string, d Device) (int64, error) {
 		return 0, ErrInvalidCode
 	}
 	now := time.Now().Unix()
-	res, err = tx.Exec(`INSERT INTO devices(token_hash,name,lang,push_token,min_level,created,last_seen) VALUES(?,?,?,?,?,?,?)`,
+	// Events from before pairing count as seen on the new device.
+	res, err = tx.Exec(`INSERT INTO devices(token_hash,name,lang,push_token,min_level,created,last_seen,seen_floor)
+		VALUES(?,?,?,?,?,?,?,(SELECT COALESCE(MAX(id), 0) FROM events))`,
 		tokenHash, d.Name, d.Lang, d.PushToken, d.MinLevel, now, now)
 	if err != nil {
 		return 0, err
@@ -276,6 +329,13 @@ func (s *Store) DeviceByToken(tokenHash string) (*Device, error) {
 		return nil, nil
 	}
 	return d, err
+}
+
+// DeviceExists reports whether the device is still paired.
+func (s *Store) DeviceExists(id int64) (bool, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM devices WHERE id=?`, id).Scan(&n)
+	return n > 0, err
 }
 
 func (s *Store) Devices() ([]Device, error) {
@@ -316,6 +376,9 @@ func (s *Store) ClearPushToken(token string) error {
 func (s *Store) DeleteDevice(id int64) (bool, error) {
 	res, err := s.db.Exec(`DELETE FROM devices WHERE id=?`, id)
 	if err != nil {
+		return false, err
+	}
+	if _, err := s.db.Exec(`DELETE FROM event_seen WHERE device_id=?`, id); err != nil {
 		return false, err
 	}
 	n, _ := res.RowsAffected()

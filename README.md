@@ -115,6 +115,30 @@ three for one device become one summary message. Tokens Expo reports as
 `DeviceNotRegistered` are removed. `push.access_token` is only needed if
 enhanced push security is on in the Expo account.
 
+## Container logs
+
+Dee can show the logs of the watched containers (only those listed under
+`containers:`), filtered by level (all, warnings, errors), text and time
+range. Multi-line entries such as Java stack traces stay together; an entry
+counts as error or warning if any of its lines does (ERROR, FATAL, SEVERE,
+panic, Traceback, `…Exception`, `…Error`; WARN, WARNING).
+
+**Caution:** every paired device can read these logs. If passwords, keys or
+other secrets are written to them, the app shows them. Tweedle always hides
+mail addresses, passwords in URLs (`user:***@host`), JWTs, `Bearer …`
+tokens and the values of keys containing `password`, `passwd`, `pwd`,
+`secret`, `token`, `apikey`, `api_key`, `api-key`, `authorization`,
+`credential`, `private_key` or `cookie` (`key=value`, `key: value`,
+`"key": "value"`). Add more key names, or switch logs off:
+
+```yaml
+logs:
+  enabled: true          # false: the app cannot read any logs
+  redact_keys: [session, iban]
+```
+
+`install` asks about it when containers are watched.
+
 ## API
 
 Routes start at `/`; a web server in front forwards its path (e.g.
@@ -125,11 +149,12 @@ Routes start at `/`; a web server in front forwards its path (e.g.
 |---|---|
 | `GET /health` | `{ok, name, version}` |
 | `POST /api/pair` | `{code, name, lang, pushToken?}` → `{token, deviceId, name}` |
-| `GET /api/status` | current snapshot + unseen warn/error count |
+| `GET /api/status` | current snapshot + unseen warn/error count, `logs`: whether container logs can be read |
 | `GET /api/history?range=1h\|6h\|24h\|7d` | minute values (max. 360 points) |
 | `GET /api/events?before=ID&limit=50&minLevel=warn` | events, newest first, `message` in the device language |
 | `POST /api/events/seen` | `{ids: [ID, …]}`: the events the app has shown (per device; `{upTo: ID}` still works) |
 | `GET/PUT/DELETE /api/device` | own settings (`name, lang, pushToken, minLevel`), unpair |
+| `GET /api/containers/NAME/logs?since=1h&level=error&q=text&limit=300` | logs of a watched container, oldest first: `{entries: [{time, level, text}], truncated}`; `since` 15m, 1h, 6h, 24h, 7d or all; 403 if `logs.enabled` is false, 404 if not watched |
 | `GET /api/live` | WebSocket: `{type:"status"}` every tick, `{type:"event"}` per event |
 
 `--config PATH` uses another config file. For testing as a normal user,

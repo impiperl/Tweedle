@@ -172,3 +172,16 @@ func TestProxyModeNewPodmanNetwork(t *testing.T) {
 		t.Fatalf("got %+v", cfg)
 	}
 }
+
+func TestLogsQuestionOnlyWithContainers(t *testing.T) {
+	cfg := config.Default()
+	cfg.Containers = []config.Container{{Name: "app"}}
+	_, got, out := run(t, cfg, true, "web1", "1", "", "https://example.com/tweedle", "", "n", "n", "n")
+	if got.Logs.Enabled || !strings.Contains(out, "logs.redact_keys") {
+		t.Fatalf("logs enabled=%v\n%s", got.Logs.Enabled, out)
+	}
+	_, got, out = run(t, config.Default(), false, "web1", "1", "", "https://example.com/tweedle", "", "n", "n")
+	if !got.Logs.Enabled || strings.Contains(out, "logs.redact_keys") {
+		t.Fatalf("without containers: enabled=%v\n%s", got.Logs.Enabled, out)
+	}
+}

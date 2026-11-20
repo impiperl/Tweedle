@@ -226,6 +226,11 @@ func (s *installer) configure(cfg *config.Config, exists bool) (mode, *config.Co
 			cfg = sel
 		}
 	}
+	if len(cfg.Containers) > 0 {
+		fmt.Fprintln(s.out)
+		s.say("inst_logs_warning", map[string]string{"path": config.DefaultPath})
+		cfg.Logs.Enabled = s.yes("inst_logs_q", cfg.Logs.Enabled, nil)
+	}
 	return m, cfg, nil
 }
 

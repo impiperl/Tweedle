@@ -86,6 +86,16 @@ type Endpoint struct {
 // ShouldVerify reports whether the TLS certificate is verified.
 func (e Endpoint) ShouldVerify() bool { return e.Verify == nil || *e.Verify }
 
+// Logs controls whether the app may read the logs of watched containers.
+// Mail addresses, passwords in URLs, JWTs and the values of common secret
+// keys (password, token, secret, api key, authorization …) are always
+// replaced by ***; RedactKeys adds more key names (matched case-insensitively
+// as part of a key, e.g. "session" also hides "session_id=…").
+type Logs struct {
+	Enabled    bool     `yaml:"enabled"`
+	RedactKeys []string `yaml:"redact_keys,omitempty"`
+}
+
 type Retention struct {
 	Metrics time.Duration `yaml:"metrics"`
 	Events  time.Duration `yaml:"events"`
@@ -133,6 +143,7 @@ type Config struct {
 	Containers []Container `yaml:"containers"`
 	Certs      Certs       `yaml:"certs"`
 	Endpoints  []Endpoint  `yaml:"endpoints"`
+	Logs       Logs        `yaml:"logs"`
 	Push       Push        `yaml:"push"`
 }
 
@@ -157,6 +168,7 @@ func Default() *Config {
 			LoadPerCore: Limit{Warn: 2},
 		},
 		Certs: Certs{CheckEvery: time.Hour, WarnDays: 14, ErrorDays: 3},
+		Logs:  Logs{Enabled: true},
 		Push:  Push{Enabled: true, Debounce: 3 * time.Second},
 	}
 }
@@ -239,6 +251,11 @@ func (c *Config) Validate() error {
 		}
 		if c.Endpoints[i].Timeout >= c.Interval {
 			return fmt.Errorf("endpoints[%d]: timeout must be shorter than interval", i)
+		}
+	}
+	for i, k := range c.Logs.RedactKeys {
+		if strings.TrimSpace(k) == "" {
+			return fmt.Errorf("logs.redact_keys[%d] must not be empty", i)
 		}
 	}
 	seen := map[string]bool{}

@@ -18,8 +18,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/impiperl/Tweedle/internal/collect"
 	"github.com/impiperl/Tweedle/internal/config"
 	"github.com/impiperl/Tweedle/internal/i18n"
+	"github.com/impiperl/Tweedle/internal/logs"
 	"github.com/impiperl/Tweedle/internal/monitor"
 	"github.com/impiperl/Tweedle/internal/store"
 )
@@ -35,6 +37,9 @@ type Server struct {
 	// checked again (a device removed with "tweedle devices rm" is cut off then).
 	livePing time.Duration
 	pairRL   rateLimiter
+	redactor *logs.Redactor
+	// fetchLogs reads container logs (collect.ContainerLogs; replaced in tests).
+	fetchLogs fetchLogsFunc
 
 	touchMu sync.Mutex
 	touched map[int64]time.Time
@@ -46,8 +51,10 @@ type Server struct {
 func New(cfg *config.Config, st *store.Store, version string) *Server {
 	return &Server{
 		cfg: cfg, store: st, version: version, hub: newHub(), livePing: 30 * time.Second,
-		pairRL:  rateLimiter{max: 10, per: time.Minute},
-		touched: map[int64]time.Time{},
+		pairRL:    rateLimiter{max: 10, per: time.Minute},
+		touched:   map[int64]time.Time{},
+		redactor:  logs.NewRedactor(cfg.Logs.RedactKeys),
+		fetchLogs: collect.ContainerLogs,
 	}
 }
 
@@ -96,6 +103,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/device", s.auth(s.handlePutDevice))
 	mux.HandleFunc("DELETE /api/device", s.auth(s.handleDeleteDevice))
 	mux.HandleFunc("GET /api/live", s.auth(s.handleLive))
+	mux.HandleFunc("GET /api/containers/{name}/logs", s.auth(s.handleContainerLogs))
 	return mux
 }
 
@@ -192,7 +200,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request, d *store.D
 	if s.mon != nil {
 		snap = s.mon.Snapshot()
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": snap, "unseen": unseen, "version": s.version})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": snap, "unseen": unseen, "version": s.version, "logs": s.cfg.Logs.Enabled,
+	})
 }
 
 var ranges = map[string]time.Duration{"1h": time.Hour, "6h": 6 * time.Hour, "24h": 24 * time.Hour, "7d": 7 * 24 * time.Hour}
